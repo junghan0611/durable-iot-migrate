@@ -5,6 +5,7 @@ import (
 
 	"github.com/junghan0611/durable-iot-migrate/converters/homeassistant"
 	"github.com/junghan0611/durable-iot-migrate/core/converter"
+	"github.com/junghan0611/durable-iot-migrate/core/expr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -151,6 +152,23 @@ func TestParser_ParseBytes(t *testing.T) {
 	// DeviceRefs should have pir and light
 	assert.Contains(t, a2.DeviceRefs, "device-pir-01")
 	assert.Contains(t, a2.DeviceRefs, "device-light-02")
+
+	// ── Expr verification: structured expression trees ──
+	// Trigger: dp_id=1, comparator="==", value=true → Eq(State("device-pir-01","dp_1"), Lit(true))
+	require.NotNil(t, a2.Triggers[0].Expr, "Tuya device trigger should have Expr")
+	assert.Equal(t, expr.Eq, a2.Triggers[0].Expr.Op)
+	assert.True(t, expr.IsValid(a2.Triggers[0].Expr))
+
+	// Action 0: command → Cmd("device-light-02", "dp_1", true)
+	require.NotNil(t, a2.Actions[0].Expr, "Tuya device command should have Expr")
+	assert.Equal(t, expr.Command, a2.Actions[0].Expr.Op)
+	assert.Equal(t, "device-light-02", a2.Actions[0].Expr.Ref.DeviceID)
+	assert.Equal(t, "dp_1", a2.Actions[0].Expr.Ref.Attribute)
+
+	// Action 1: delay 300s
+	require.NotNil(t, a2.Actions[1].Expr, "Tuya delay should have Expr")
+	assert.Equal(t, expr.Delay, a2.Actions[1].Expr.Op)
+	assert.Equal(t, float64(300), a2.Actions[1].Expr.Value)
 
 	// Scene 3: Sunset — sun trigger + scene action
 	a3 := autos[2]

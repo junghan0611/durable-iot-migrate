@@ -24,6 +24,7 @@ import (
 	"fmt"
 
 	"github.com/junghan0611/durable-iot-migrate/core/converter"
+	"github.com/junghan0611/durable-iot-migrate/core/expr"
 	"github.com/junghan0611/durable-iot-migrate/core/models"
 )
 
@@ -125,6 +126,9 @@ func convertTuyaCondition(c tuyaCondition) models.Trigger {
 			trigger.Config["dp_id"] = c.Expr["dp_id"]
 			trigger.Config["comparator"] = c.Expr["comparator"]
 			trigger.Config["to"] = c.Expr["value"]
+
+			// Build structured Expr
+			trigger.Expr = buildTuyaComparisonExpr(c.EntityID, c.Expr)
 		}
 	case 3: // Weather / sunrise / sunset
 		trigger.Type = converter.TriggerSun
@@ -148,6 +152,39 @@ func convertTuyaCondition(c tuyaCondition) models.Trigger {
 	}
 
 	return trigger
+}
+
+// buildTuyaComparisonExpr converts Tuya's explicit comparator to a structured Expr.
+// Tuya is the most explicit: {"dp_id": "1", "comparator": "==", "value": true}
+func buildTuyaComparisonExpr(deviceID string, tuyaExpr map[string]any) *expr.Expr {
+	dpID, _ := tuyaExpr["dp_id"].(string)
+	if dpID == "" {
+		return nil
+	}
+
+	attribute := "dp_" + dpID
+	stateRef := expr.State(deviceID, attribute)
+	value := tuyaExpr["value"]
+	lit := expr.Lit(value)
+
+	comp, _ := tuyaExpr["comparator"].(string)
+	switch comp {
+	case "==":
+		return expr.EqExpr(stateRef, lit)
+	case "!=":
+		return expr.NeExpr(stateRef, lit)
+	case ">":
+		return expr.GtExpr(stateRef, lit)
+	case ">=":
+		return expr.GeExpr(stateRef, lit)
+	case "<":
+		return expr.LtExpr(stateRef, lit)
+	case "<=":
+		return expr.LeExpr(stateRef, lit)
+	default:
+		// Unknown comparator — still create Eq as default
+		return expr.EqExpr(stateRef, lit)
+	}
 }
 
 func convertTuyaPrecondition(pc tuyaPrecondition) models.Condition {
@@ -189,6 +226,12 @@ func convertTuyaAction(a tuyaAction) models.Action {
 		if a.ExecutorProperty != nil {
 			action.Config["dp_id"] = a.ExecutorProperty["dp_id"]
 			action.Config["value"] = a.ExecutorProperty["value"]
+
+			// Build structured Expr
+			dpID, _ := a.ExecutorProperty["dp_id"].(string)
+			if dpID != "" {
+				action.Expr = expr.Cmd(a.EntityID, "dp_"+dpID, a.ExecutorProperty["value"])
+			}
 		}
 		if a.ActionExecutor != "" {
 			action.Config["executor"] = a.ActionExecutor
@@ -204,12 +247,18 @@ func convertTuyaAction(a tuyaAction) models.Action {
 	case 3: // Activate scene
 		action.Type = converter.ActionScene
 		action.Config["scene_id"] = a.EntityID
+		action.Expr = expr.SceneExpr(a.EntityID)
 	case 7: // Delay
 		action.Type = converter.ActionDelay
 		action.DeviceID = ""
 		if a.ExecutorProperty != nil {
 			action.Config["seconds"] = a.ExecutorProperty["seconds"]
 			action.Config["minutes"] = a.ExecutorProperty["minutes"]
+
+			// Build structured Expr
+			secs := toFloat64(a.ExecutorProperty["seconds"])
+			mins := toFloat64(a.ExecutorProperty["minutes"])
+			action.Expr = expr.DelayExpr(secs + mins*60)
 		}
 	default:
 		action.Type = fmt.Sprintf("tuya_action_%d", a.EntityType)
@@ -217,6 +266,19 @@ func convertTuyaAction(a tuyaAction) models.Action {
 	}
 
 	return action
+}
+
+func toFloat64(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case json.Number:
+		f, _ := n.Float64()
+		return f
+	}
+	return 0
 }
 
 func appendUnique(slice []string, val string) []string {
