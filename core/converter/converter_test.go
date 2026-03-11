@@ -110,7 +110,7 @@ func TestCheckCompatibility_Empty(t *testing.T) {
 }
 
 func TestKnownPlatforms_Coverage(t *testing.T) {
-	expected := []string{"homeassistant", "tuya", "smartthings", "google"}
+	expected := []string{"homeassistant", "tuya", "smartthings", "google", "homey"}
 	for _, p := range expected {
 		support, ok := KnownPlatforms[p]
 		assert.True(t, ok, "platform %s should be known", p)
@@ -137,7 +137,7 @@ func TestConversionMatrix(t *testing.T) {
 		},
 	}
 
-	platforms := []string{"homeassistant", "tuya", "smartthings", "google"}
+	platforms := []string{"homeassistant", "tuya", "smartthings", "google", "homey"}
 	for _, src := range platforms {
 		for _, tgt := range platforms {
 			if src == tgt {

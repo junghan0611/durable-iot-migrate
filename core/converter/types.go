@@ -183,6 +183,21 @@ var KnownPlatforms = map[string]PlatformSupport{
 			ActionDelay: true, ActionScene: true,
 		},
 	},
+	"homey": {
+		Platform: "homey",
+		Triggers: map[string]bool{
+			TriggerDeviceState: true, TriggerSchedule: true,
+			TriggerSun: true, TriggerWebhook: true, TriggerGeofence: true,
+		},
+		Conditions: map[string]bool{
+			CondDeviceState: true, CondTime: true, CondNumeric: true,
+			CondAnd: true, CondOr: true,
+		},
+		Actions: map[string]bool{
+			ActionDeviceCommand: true, ActionNotify: true,
+			ActionDelay: true, ActionScene: true, ActionWebhook: true,
+		},
+	},
 }
 
 // CheckCompatibility reports what would be lost converting from source to target.
