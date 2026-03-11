@@ -133,11 +133,107 @@ Each batch is an independent Temporal workflow. Auto-halt if success rate drops 
 - [Doltgres](https://github.com/dolthub/doltgresql) (optional, for audit trail)
 - Go 1.22+
 
+## Quick Start
+
+```bash
+# 1. Enter dev environment (Go + Temporal CLI + psql)
+nix develop
+
+# 2. Run tests (no server needed)
+go test ./... -cover
+
+# 3. Start Temporal dev server
+temporal server start-dev
+
+# 4. In another terminal: start worker
+go run ./cmd/worker
+
+# 5. In another terminal: trigger migration
+go run ./cmd/cli start my-first-batch
+```
+
+## Test Coverage
+
+48 tests, **98.6% library code coverage**. No real IoT devices needed.
+
+```
+adapters/mock     98.1%   — error injection for every failure path
+core/activities   97.8%   — every Saga compensation path tested
+core/models      100.0%
+core/workflows   100.0%   — including 500-device scale test
+```
+
+Mock adapter generates random devices and automations with deterministic seeds:
+
+```go
+rng := rand.New(rand.NewPCG(42, 0))
+devices := mock.GenerateDevices(500, rng)
+autos := mock.GenerateAutomations(200, devices, rng)
+```
+
+Error injection covers every protocol-level failure:
+
+| Injection | Tests |
+|-----------|-------|
+| `FailUnbindIDs` | Source unbind fails → migration halts, no partial state |
+| `FailDeviceIDs` | Target bind fails → Saga compensates (rebind to source) |
+| `FailVerifyIDs` | Verification fails → unbind from target + rebind to source |
+| `ErrorVerifyIDs` | Verify returns error (not just false) → same compensation |
+| `FailRebindIDs` | Rollback rebind fails → error propagated to caller |
+| `FailAutoIDs` | Automation creation fails → reported, devices stay migrated |
+
+## Roadmap
+
+- [ ] Home Assistant adapter (first real platform — Open Home Foundation ecosystem)
+- [ ] Doltgres audit activity (row-level migration log with git-like diff)
+- [ ] Fan-out concurrent device migration (currently sequential)
+- [ ] Temporal Query handler for real-time progress from apps
+- [ ] ThingsBoard adapter (Rule Chain export/import)
+- [ ] matter.js direct adapter (Matter device commissioning transfer)
+- [ ] Notification activity (webhook / chat alerts)
+- [ ] CI with coverage gate
+
+## History
+
+### 2026-03-11: Project Genesis
+
+**Origin**: Need for a reliable IoT device migration tool. Existing solutions are all "run-and-pray" — no checkpointing, no rollback, no audit trail.
+
+**Research findings**:
+- Google IoT Core shutdown (2023) left thousands of users with no standard migration path
+- Home Assistant community has recurring WTH issues about automation import/export
+- ThingsBoard has JSON export but no integrated device+rule chain migration with rollback
+- No open-source project combines durable execution with IoT migration
+
+**Key decisions**:
+- **Temporal** for durable execution — already proven in production (OpenAI, Descript), dev server included in CLI
+- **Go** over Python — Temporal's first-class SDK, single binary deployment, better agent compatibility
+- **Saga pattern** for automatic rollback — each forward step has a compensation action
+- **Platform-agnostic interfaces** — `SourcePlatform` / `TargetPlatform` with adapters as plugins
+- **NixOS flake.nix** — `nix develop` gives complete environment (Go + temporal-cli + psql)
+- **Mock adapter with error injection** — protocol-level testing without real IoT devices
+
+**What was built**:
+- Core: models (Device, Automation, BatchConfig, BatchResult), interfaces, DeviceMigrationWorkflow (2-phase: devices → automations)
+- Mock adapter: random generator + 6 error injection points
+- CLI: `start` / `status` commands
+- Worker: connects to Temporal, registers workflows + activities
+- 48 tests, 98.6% library coverage
+- Verified on Temporal dev server: 5/5 mock devices migrated successfully
+
+**What was learned**:
+- `temporal-cli` includes a full dev server — no Docker needed for development
+- Temporal's `testsuite` lets you test workflows without a running server
+- `math/rand/v2` required for `IntN` / `NewPCG` (not `math/rand`)
+- Workflow `SuccessThreshold <= 0` gets overridden to default — use small positive values
+
 ## Status
 
-🚧 **Early stage** — Architecture defined, interfaces designed, implementation starting.
+🚧 **Core framework complete** — interfaces, workflows, mock adapter, tests all working.
 
-Contributions welcome. See [AGENTS.md](AGENTS.md) for coding guidelines.
+Next: Home Assistant adapter as the first real-world platform target.
+
+Contributions welcome. See [AGENTS.md](AGENTS.md) for guidelines.
 
 ## Related Projects
 
