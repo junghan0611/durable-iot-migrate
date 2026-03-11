@@ -1,0 +1,35 @@
+# Private / vendor-specific work
+office/
+
+# Build artifacts
+/bin/
+/dist/
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
+
+# Environment
+.env
+.env.local
+*.key
+*.pem
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporal
+temporal-data/
+
+# Nix
+result
+result-*
