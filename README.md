@@ -1,8 +1,9 @@
 # durable-iot-migrate
 
-**Durable IoT platform migration framework + multi-platform automation converter.**
+**IoT 플랫폼 마이그레이션 프레임워크 — Clojure semantic layer + Temporal durable execution.**
 
-Migrate devices and automations between IoT platforms with automatic retry, rollback, and semantic verification. Convert automation recipes across Home Assistant, SmartThings, Google Home, Tuya, and Homey.
+디바이스와 자동화 레시피를 IoT 플랫폼 간에 안전하게 이전한다.
+자동 재시도, Saga 롤백, 의미 보존 검증.
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -10,74 +11,95 @@ Migrate devices and automations between IoT platforms with automatic retry, roll
 
 ## Two Axes of "Durable"
 
-| Axis | What's preserved | Mechanism |
-|------|-----------------|-----------|
-| **Durable execution** | Migration process survives crashes | Temporal workflows + Saga rollback |
-| **Durable semantics** | Automation meaning survives conversion | Expr AST + equivalence verification |
+| 축 | 보존 대상 | 메커니즘 |
+|----|----------|---------|
+| **Durable execution** | 마이그레이션 프로세스가 크래시에서 살아남음 | Temporal workflow + Saga rollback |
+| **Durable semantics** | 자동화 규칙의 의미가 변환에서 살아남음 | Clojure Expr IR + equivalence verification |
 
-Both are "durable". One is infrastructure, the other is logic. A flexible system that preserves structure IS durable.
+유연한 것이 durable한 것이다.
+구조 있는 유연성 = durable semantics.
 
-## The Problem
+## Why Clojure
 
-Migrating IoT devices between platforms is a universal pain:
+Sussman 교수의 SDF(Software Design for Flexibility) 철학이 이 프로젝트의 뼈대다.
+SDF의 뿌리는 Scheme/Lisp에 있고, Clojure는 그 철학을 JVM 위에 실현한 언어다.
 
-- **Google IoT Core shutdown (2023)** — Thousands of devices, no standard migration tool
-- **Home Assistant** — No automation import/export ([WTH issue](https://community.home-assistant.io/t/wth-is-there-no-way-to-import-export-a-solution/804060) with hundreds of comments)
-- **Platform switches** — Homey → HA, proprietary → open source — always manual
-- **No semantic verification** — "Did the converted automation actually mean the same thing?"
+**코드가 곧 데이터(homoiconicity)** — IoT 레시피를 표현하고, 변환하고, 검증하는 데
+이보다 자연스러운 도구는 없다:
 
-The industry standard is **"run a script and pray"**. No checkpointing, no rollback, no verification.
-
-## Multi-Platform Automation Converter
-
-Every IoT platform uses trigger → condition → action. Only the syntax differs:
-
-```
-HA YAML ───→ Parser ──→ core.Automation ──→ Emitter ──→ SmartThings JSON
-Tuya JSON ──→ Parser ──→ core.Automation ──→ Emitter ──→ Google Home YAML
-Homey JSON ─→ Parser ──→     (Expr AST)  ──→ Emitter ──→ HA YAML
-```
-
-### 5 Platforms Supported
-
-| Platform | Format | Parser | Emitter | Status |
-|----------|--------|--------|---------|--------|
-| **Home Assistant** | YAML | ✅ | ✅ | Full round-trip |
-| **SmartThings** | JSON (Rules API) | ✅ | — | Parse only |
-| **Google Home** | YAML (Scripted) | ✅ | — | Parse only |
-| **Tuya** | JSON (Scene API) | ✅ | — | Parse + Expr |
-| **Homey** | JSON (Flow API) | ✅ | — | Parse only |
-
-Cross-conversion verified: 5×5 compatibility matrix (20 pairs).
-
-### Standard Type System
-
-```
-Triggers (5):  device_state, schedule, sun, webhook, geofence
-Conditions (6): device_state, time, numeric, zone, and, or
-Actions (5):   device_command, notify, delay, scene, webhook
+```clojure
+;; 아기방 움직임 감지 → 녹화 + 알림
+(recipe
+  :id "baby_camera_motion"
+  :name "아기방 움직임 감지"
+  :trigger   (eq (state-ref "camera.baby" "motion") (lit true))
+  :condition (between (time-ref "now") (lit "22:00") (lit "06:00"))
+  :actions   (seq-expr
+               (cmd "camera.baby" "recording" "start")
+               (delay-expr 5)
+               (notify "아기방 움직임 감지!")))
 ```
 
-All platforms map to these standard types. Platform-specific details preserved in `Config` maps and structured `Expr` trees.
+Go 대비 Clojure의 장점:
 
-### Expr — Structured Expression AST
+| 영역 | Go | Clojure |
+|------|-----|---------|
+| 타입 표현 | struct + Op enum + Validate() | 맵이 곧 타입 |
+| 트리 변환 | 매번 재귀 함수 작성 | `walk-expr` 한 줄 |
+| 열린 확장 | `Op string` (관례적 열림) | 네임스페이스 키워드 (`:ha/choose`) |
+| 값 비교 | `fmt.Sprintf("%v", v)` (타입 손실) | 네이티브 타입 보존 비교 |
+| 직렬화 | JSON 태그 | EDN (타입 보존) + JSON |
 
-The core differentiator. `map[string]any` is fragile flexibility. Expr is durable flexibility:
+## Expr — 레시피의 중간 표현(IR)
 
-```go
-// "Temperature above 25°C" — same meaning, 5 different platform syntaxes:
-//   Tuya:  dp_id=4, comparator=">", value=25
-//   HA:    trigger: numeric_state, above: 25
-//   ST:    if.greaterThan(device.main.temperature, 25)
-//   All → GtExpr(State("sensor", "temperature"), Lit(25))
+모든 IoT 플랫폼은 trigger → condition → action 패턴을 공유한다.
+표현만 다를 뿐이다. Expr은 이 차이를 흡수하는 보편 문법이다:
 
-trigger := GtExpr(State("sensor", "temperature"), Lit(25))
-assert.True(t, IsValid(trigger))               // structural check
-assert.True(t, StructuralEquiv(tuya, ha))       // same shape
-assert.True(t, EquivWithMapping(tuya, ha, m))   // same meaning
+```
+HA YAML ───→ Parser ──→ Expr 맵 ──→ Emitter ──→ SmartThings JSON
+Tuya JSON ──→ Parser ──→ Expr 맵 ──→ Emitter ──→ Google Home YAML
+Homey JSON ─→ Parser ──→ Expr 맵 ──→ Emitter ──→ HA YAML
 ```
 
-22 operators: 9 comparison (eq/ne/gt/lt/between/in/contains) + 5 combinators (and/or/not/seq/parallel) + 4 actions (command/delay/notify/scene) + 3 leaf types (literal/state_ref/time_ref).
+### 5 Platforms
+
+| Platform | Format | Parser | Emitter |
+|----------|--------|--------|---------|
+| **Home Assistant** | YAML | 🔄 porting | — |
+| **SmartThings** | JSON (Rules API) | 🔄 porting | — |
+| **Google Home** | YAML (Scripted) | 🔄 porting | — |
+| **Tuya** | JSON (Scene API) | 🔄 porting | — |
+| **Homey** | JSON (Flow API) | 🔄 porting | — |
+
+### Equivalence — 의미 동치 검증
+
+```clojure
+;; Tuya: dp_1 == true
+;; HA:   state == "on"
+;; 구조적으로 같은가?
+(structural-equiv? tuya-expr ha-expr)  ; => true
+
+;; 값 매핑 포함 의미적으로 같은가?
+(equiv? tuya-expr ha-expr motion-mapper)  ; => true
+
+;; 어디서 갈라졌는가?
+(diff expr-a expr-b)  ; => [{:path [1] :type :value-mismatch ...}]
+```
+
+### Open Extension
+
+Go에서는 22종 Op으로 모든 플랫폼을 커버해야 했다.
+Clojure에서는 키워드 하나면 확장 끝:
+
+```clojure
+;; HA의 choose (if-else 분기) — 표준 Op에 없어도 그냥 쓴다
+{:op :ha/choose
+ :children [{:op :eq ... :then (cmd ...)}
+            {:op :eq ... :then (cmd ...)}]}
+
+;; walk-expr는 :op을 몰라도 :children만 있으면 순회한다
+(walk-expr identity ha-choose)  ; 그냥 작동
+```
 
 ## Durable Migration (Temporal)
 
@@ -89,170 +111,73 @@ Device 1 ✅ → Device 2 ✅ → Device 3 ✅ → Device 4 💥 crash
                                           Device 4 resumes ✅
 ```
 
-### Saga Pattern — Automatic Rollback
+Temporal Clojure SDK ([manetu/temporal-clojure-sdk](https://github.com/manetu/temporal-clojure-sdk))로
+워커와 워크플로우도 Clojure로 구현 예정.
 
-| Step | Forward | Compensation |
-|------|---------|-------------|
-| 1 | Unbind from source | Rebind to source |
-| 2 | Bind to target | Unbind from target |
-| 3 | Verify connectivity | — |
-| 4 | Transfer automation | Delete from target |
-
-If step 3 fails after migrating 500 devices, Temporal runs compensations in reverse for all 500.
-
-### Safety Classes
-
-Devices are classified by safety criticality:
-
-| Class | Devices | Policy |
-|-------|---------|--------|
-| **Critical** (~19%) | Camera, lock, smoke detector | Zero-tolerance, human approval gate |
-| **Important** (~5%) | Thermostat, garage door | Auto-rollback on any failure |
-| **Normal** (~76%) | Light, plug, sensor | Batch threshold halt |
-
-### Fleet Scale
-
-```go
-fleet := mock.GenerateFleet(100_000, 0.3, rng)
-// → 1.06M devices (202K safety-critical) in 1.5 seconds
-// Power-law distribution: 60% have 1-5 devices, 5% have 40-100
-```
-
-No real hardware needed. All simulation is deterministic via PCG seeds.
-
-## Architecture
+## Project Structure
 
 ```
-┌─ core/ ───────────────────────────────────────────────┐
-│  models/        Device, Automation, Account, SafetyClass│
-│  expr/          Expr AST, Validate, Equiv, DeviceRef    │
-│  converter/     Parser/Emitter interfaces, type system  │
-│  activities/    Saga migration activities               │
-│  workflows/     DeviceMigrationWorkflow (2-phase)       │
-└─────────────────────────────────────────────────────────┘
+src/iot/semantic/
+  expr.clj              ✅ Expr IR — combinators, walk, fold
+  equiv.clj             ✅ structural-equiv?, equiv?, diff
+  validate.clj          → spec/malli 기반 검증 (planned)
+  parser/
+    homeassistant.clj   → HA YAML → Expr (porting)
+    smartthings.clj     → ST JSON → Expr (porting)
+    tuya.clj            → Tuya JSON → Expr (porting)
+    google.clj          → Google YAML → Expr (porting)
+    homey.clj           → Homey JSON → Expr (porting)
+  emitter/              → Expr → platform format (planned)
+  fidelity.clj          → round-trip 검증 (planned)
 
-┌─ converters/ ─────────────────────────────────────────┐
-│  homeassistant/  YAML parser + emitter (round-trip)    │
-│  smartthings/    JSON Rules API parser                  │
-│  google/         YAML Scripted Automation parser        │
-│  tuya/           JSON Scene API parser (+ Expr)         │
-│  homey/          JSON Flow API parser                   │
-└─────────────────────────────────────────────────────────┘
+test/iot/semantic/
+  expr_test.clj         ✅ 9 tests, 37 assertions
 
-┌─ adapters/ ────────────────────────────────────────────┐
-│  mock/           Fleet generator + 6 error injections   │
-│  your-platform/  Implement SourcePlatform/TargetPlatform│
-└─────────────────────────────────────────────────────────┘
-```
-
-### Key Interfaces
-
-```go
-// Converter layer: parse any format → core.Automation → emit any format
-type Parser interface {
-    Platform() string
-    ParseBytes(data []byte) ([]models.Automation, error)
-}
-type Emitter interface {
-    Platform() string
-    EmitBytes(autos []models.Automation) ([]byte, error)
-}
-
-// Migration layer: move devices between platforms
-type SourcePlatform interface {
-    ListDevices(ctx context.Context) ([]Device, error)
-    ListAutomations(ctx context.Context) ([]Automation, error)
-    UnbindDevice(ctx context.Context, deviceID string) error
-    RebindDevice(ctx context.Context, deviceID string) error  // compensation
-}
-type TargetPlatform interface {
-    BindDevice(ctx context.Context, device Device) error
-    CreateAutomation(ctx context.Context, auto Automation) error
-    VerifyDevice(ctx context.Context, deviceID string) (bool, error)
-    UnbindDevice(ctx context.Context, deviceID string) error       // compensation
-    DeleteAutomation(ctx context.Context, autoID string) error     // compensation
-}
+archive/go/             Go 참조 구현 (154 tests, 12 packages)
+deps.edn                Clojure dependencies
+flake.nix               NixOS dev environment
 ```
 
 ## Quick Start
 
 ```bash
-# 1. Enter dev environment (Go 1.25 + Temporal CLI 1.5 + psql 16)
+# Dev environment
 nix develop
 
-# 2. Run tests (no server needed)
-go test ./... -cover
+# Run tests
+clj -M:test
 
-# 3. Start Temporal dev server
-temporal server start-dev
-
-# 4. Start worker + trigger migration
-go run ./cmd/worker &
-go run ./cmd/cli start my-first-batch
+# Go reference (archive)
+cd archive/go && go test ./...
 ```
-
-## Test Coverage
-
-**154 tests, 86% coverage, 12 packages.**
-
-```
-core/models      100.0%   — Device, Automation, Account, SafetyClass
-core/workflows   100.0%   — including 500-device scale test
-core/activities   97.8%   — every Saga compensation path
-core/converter    97.3%   — 5×5 compatibility matrix
-core/expr         76.3%   — validation, equivalence, cross-platform
-converters/*      79-93%  — 5 platform parsers + HA emitter
-adapters/mock     98.1%   — fleet generation + error injection
-```
-
-Error injection: `FailUnbindIDs`, `FailDeviceIDs`, `FailVerifyIDs`, `ErrorVerifyIDs`, `FailRebindIDs`, `FailAutoIDs`.
-
-## Roadmap
-
-### P1 — Next
-- [ ] Conversion fidelity test suite — round-trip Expr verification, coverage matrix, property-based testing (br: `1wd`)
-- [ ] Realistic failure simulation — API rate limit, network latency, partial outage (br: `2nk`)
-- [ ] Doltgres audit activity — row-level migration log with git-like diff (br: `1gu`)
-
-### P2 — Planned
-- [ ] IAIF spec — IoT Automation Interchange Format specification (br: `31c`)
-- [ ] RefMapper — cross-platform attribute normalization (dp_1 ↔ state ↔ switch.switch)
-- [ ] Emitters for SmartThings, Google Home, Tuya, Homey
-- [ ] Fan-out concurrent device migration (br: `58i`)
-- [ ] Temporal Query handler for real-time progress (br: `2ph`)
-- [ ] ThingsBoard adapter (br: `3pk`)
-- [ ] CI with coverage gate (br: `12w`)
-
-### P3 — Future
-- [ ] matter.js direct adapter (br: `16g`)
-- [ ] Notification activity — webhook/chat alerts (br: `2gx`)
 
 ## History
 
-| Date | Milestone | Stats |
-|------|-----------|-------|
-| 2026-03-11 AM | Project genesis — core, mock, workflow, CLI, worker | 48 tests |
-| 2026-03-11 PM | Account model, SafetyClass, fleet simulation (100K→1M devices) | 77 tests |
-| 2026-03-11 PM | Multi-converter: HA, SmartThings, Google Home, Tuya | 112 tests |
-| 2026-03-11 PM | Homey converter — 5th platform | 119 tests |
-| 2026-03-11 PM | **Expr type system** — structured AST, cross-platform equivalence | 154 tests |
+| Date | Milestone |
+|------|-----------|
+| 2026-03-11 | Project genesis — Go core, mock adapter, 5 converters, Expr AST (154 tests) |
+| 2026-03-12 | **Clojure 전환** — semantic layer in Clojure, Go code archived |
 
 ## Design Philosophy
 
-Inspired by Sussman's [Software Design for Flexibility](https://mitpress.mit.edu/9780262045490/):
+> "최고의 시스템은 진화할 수 있는 유연성을 갖췄다.
+> 기존 코드를 수정하는 대신 새 코드를 추가해 새로운 상황에 적응하는
+> 가산적 프로그래밍을 활용한다."
+> — Gerald Jay Sussman, SDF 서문
 
-> "Organizing systems using combinators to compose mix-and-match parts with standardized interfaces."
+> "코드는 다음 프로젝트의 프롬프트다."
+> — 정한
 
-- **Additive programming**: New platform = new Parser/Emitter. No existing code changes.
-- **Combinators**: `AndExpr(a, b)`, `SeqExpr(cmd, delay, cmd)` — compose freely.
-- **Standardized interfaces**: `Parser`/`Emitter`/`SourcePlatform`/`TargetPlatform`.
-- **Independent annotation layers**: `SafetyClass`, `Meta`, `SourceMeta`.
+이 프로젝트에서 만드는 코드는 단순한 마이그레이션 도구가 아니다.
+다음 에이전트들이 "이 우주에서는 규칙을 이렇게 구조화하고 조립하는 거구나"라고
+배우게 될 첫 번째 교과서다.
 
-## Related Projects
+## Related
 
 - [Temporal](https://temporal.io) — Durable execution platform
-- [Doltgres](https://github.com/dolthub/doltgresql) — Git-like PostgreSQL
-- [HomeAgent](https://github.com/junghan0611/homeagent-config) — Open-source Matter smart home platform
+- [temporal-clojure-sdk](https://github.com/manetu/temporal-clojure-sdk) — Clojure SDK for Temporal
+- [SDF](https://mitpress.mit.edu/9780262045490/) — Software Design for Flexibility (Sussman & Hanson)
+- [HomeAgent](https://github.com/junghan0611/homeagent-config) — Open-source Matter smart home
 - [Open Home Foundation](https://www.openhomefoundation.io/) — Sustainable smart home ecosystem
 
 ## License

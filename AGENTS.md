@@ -2,91 +2,128 @@
 
 ## Project
 
-Durable IoT platform migration framework built on Temporal.
-Platform-agnostic: core has no vendor names, adapters connect platforms.
+Durable IoT platform migration framework.
+Clojure semantic layer (Expr IR, equivalence, converters) + Temporal durable execution.
+SDF (Software Design for Flexibility) philosophy: code is data, combinators compose freely.
 
 ## Language
 
-- Code & docs: English
-- Go for workers/CLI, SQL for Doltgres schemas
+- **Primary**: Clojure (semantic layer, converters, CLI, tests)
+- **Archive**: Go reference implementation in `archive/go/` (154 tests, 12 packages)
+- Docs: English code, Korean docs
 
 ## Architecture
 
 ```
-core/           → Platform-independent workflows, activities, models
-adapters/       → Platform-specific Source/Target implementations
-  mock/         → In-memory adapter with error injection (testing)
-cmd/            → Worker, API server, CLI binaries
-schemas/        → Doltgres migration audit tables
-docs/           → Architecture, patterns, examples
-deploy/         → Docker Compose for Temporal + Doltgres
-office/         → Private vendor-specific notes (gitignored)
-.beads/         → Issue tracking (br)
+src/iot/semantic/
+  expr.clj           → Expr IR: combinators, walk-expr, fold-expr
+  equiv.clj          → structural-equiv?, equiv?, diff
+  validate.clj       → spec/malli validation (planned)
+  parser/            → Platform-specific parsers → Expr maps
+  emitter/           → Expr maps → platform-specific format
+  fidelity.clj       → Round-trip verification (planned)
+
+test/iot/semantic/   → Tests (cognitect test-runner)
+archive/go/          → Go reference (preserved until Clojure reaches parity)
+tmp/                 → temporal-clojure-sdk reference
 ```
 
-## Key Interfaces
+## Expr IR — The Core Data Model
 
-- `SourcePlatform` — ListDevices, ListAutomations, UnbindDevice, RebindDevice
-- `TargetPlatform` — BindDevice, CreateAutomation, VerifyDevice, UnbindDevice, DeleteAutomation
+Expr is a plain Clojure map. No defrecord, no deftype:
 
-## Principles
+```clojure
+{:op :eq
+ :children [{:op :state-ref :device "sensor" :attr "motion"}
+            {:op :lit :value true}]}
+```
 
-- **Durable Execution**: Every activity is a checkpoint. Crash → resume, not restart.
-- **Saga Pattern**: Each forward action has a compensation. Failure → rollback in reverse.
-- **Platform Agnostic**: Core knows interfaces, not vendors. Adapters are plugins.
-- **Reproducibility**: Doltgres commit + Temporal RunID + git commit = full audit trail.
-- **Simplicity First**: Start with the dumbest thing that works. Add complexity when needed.
-- **Test First**: 98%+ library coverage required. No real IoT devices needed — mock adapter covers all protocol-level paths.
+### Standard Ops
+
+| Category | Ops |
+|----------|-----|
+| Comparison | `:eq` `:ne` `:gt` `:ge` `:lt` `:le` `:between` `:in` `:contains` |
+| Combinators | `:and` `:or` `:not` `:seq` `:parallel` |
+| Actions | `:command` `:delay` `:notify` `:scene` |
+| Leaf | `:lit` `:state-ref` `:time-ref` |
+
+### Open Extension
+
+Platform-specific ops use namespaced keywords:
+`:ha/choose`, `:ha/repeat`, `:tuya/precondition`, `:homey/card`
+
+`walk-expr` traverses any `:op` — it only needs `:children`.
+
+## Key Interfaces (Protocols, planned)
+
+```clojure
+;; Converter layer
+(defprotocol Parser
+  (platform [this])
+  (parse-bytes [this data]))
+
+(defprotocol Emitter
+  (emit-bytes [this recipes]))
+
+;; Migration layer (via Temporal activities)
+(defprotocol SourcePlatform
+  (list-devices [this])
+  (list-automations [this])
+  (unbind-device [this device-id])
+  (rebind-device [this device-id]))
+
+(defprotocol TargetPlatform
+  (bind-device [this device])
+  (create-automation [this auto])
+  (verify-device [this device-id])
+  (target-unbind-device [this device-id])
+  (delete-automation [this auto-id]))
+```
 
 ## Development
 
 ```bash
-nix develop                       # Go 1.25 + temporal-cli 1.5.1 + psql
-go test ./... -cover              # Tests must pass before commit
-temporal server start-dev         # Local dev server (gRPC:7233, UI:8233)
-go run ./cmd/worker               # Worker with mock adapter
-go run ./cmd/cli start <batch-id> # Trigger migration
+nix develop                       # Clojure 1.12 + JDK 17 + temporal-cli
+clj -M:test                       # Run tests
+cd archive/go && go test ./...    # Go reference tests
 ```
 
 ## Testing Strategy
 
-- Mock adapter has error injection: `FailUnbindIDs`, `FailDeviceIDs`, `FailVerifyIDs`, `ErrorVerifyIDs`, `FailRebindIDs`, `FailAutoIDs`
-- `mock.GenerateDevices(N, rng)` / `mock.GenerateAutomations(M, devices, rng)` — deterministic random generation
-- Temporal `testsuite.TestWorkflowEnvironment` for workflow tests (no server needed)
-- Temporal `testsuite.TestActivityEnvironment` for activity tests (heartbeat/context)
-- Scale tests: 500 devices + random failures verified
-- Every Saga compensation path (unbind→rollback, bind→rollback, verify→rollback) tested independently
+- Pure data: Expr maps are immutable, testable without mocks
+- Cross-platform: 5 platforms × equiv? verification
+- Value mapping: motion mapper (true ↔ "on" ↔ "active")
+- Diff reporting: structural diff when equiv? fails
+- Property-based: test.check for random Expr generation (planned)
+- **Goal**: Clojure tests must reach Go's 154-test coverage before archive removal
 
 ## Conventions
 
-- Go standard layout
-- `go test ./...` must pass — coverage ≥ 98% for library code
-- Temporal workflow functions must be deterministic (no side effects)
-- Activity functions handle side effects (API calls, DB writes)
-- `math/rand/v2` for random generation (not `math/rand`)
+- Pure Clojure maps over defrecord/deftype
+- Namespaced keywords for extension (`:ha/choose`, not `"ha:choose"`)
+- cognitect test-runner for tests
+- `clj -M:test` must pass before commit
 - Commit messages: `type: description` (feat/test/fix/docs/refactor)
-
-## Gotchas
-
-- `SuccessThreshold <= 0` is treated as "use default (0.95)" — set to small positive (e.g., 0.01) for near-zero thresholds
-- Temporal test env retries activities per RetryPolicy — `env.OnActivity` mocks must account for retry behavior
-- `mock2 "github.com/stretchr/testify/mock"` alias needed when `mock` is already the adapter package
 
 ## Issue Tracking (beads_rust)
 
 ```bash
 br list                          # List issues
-br show <id>                     # Show issue detail
-br create "title"                # Create issue
-br create "title" -p p0 -l "tag1,tag2" -t epic
-
-br update <id> -s in_progress    # Status: open, in_progress, blocked, deferred, closed
-br update <id> -p p1             # Priority: p0~p4
-
-# Close — design/acceptance_criteria/notes must be set first (NOT NULL constraint)
-br update <id> --design "..." --acceptance-criteria "..." --notes "..."
-br close <id>
-
-br comments add <id> "text"      # Add comment (note: "comments add", not "comment")
-br sync --flush-only             # Export JSONL before git commit
+br create "title" -p p1 -l "clojure,tag"
+br update <id> -s in_progress
+br close <id>                    # After setting design/acceptance-criteria/notes
+br sync --flush-only && git add .beads/ && git commit
 ```
+
+## Migration Plan: Go → Clojure
+
+| Phase | Task | Status |
+|-------|------|--------|
+| 1 | Archive Go to `archive/go/` | ✅ |
+| 2 | Clojure Expr IR + equiv | ✅ |
+| 3 | flake.nix for Clojure | ✅ |
+| 4 | README + AGENTS.md rewrite | ✅ |
+| 5 | Port 5 platform parsers | 🔄 |
+| 6 | Clojure CLI | 🔄 |
+| 7 | Temporal Clojure workers | 🔄 |
+| 8 | Coverage parity → remove `archive/go/` | ⬜ |

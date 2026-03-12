@@ -1,5 +1,5 @@
 {
-  description = "durable-iot-migrate — Durable IoT platform migration on Temporal";
+  description = "durable-iot-migrate — Durable IoT platform migration with Clojure semantic layer";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
@@ -16,17 +16,18 @@
           name = "durable-iot-migrate";
 
           buildInputs = with pkgs; [
-            # Go toolchain
-            go
-            gopls
-            golangci-lint
-            delve
+            # Clojure
+            clojure
+            jdk17_headless
 
             # Temporal
-            temporal-cli  # includes dev server (temporal server start-dev)
+            temporal-cli
 
             # Database
             postgresql_16  # psql client for Doltgres
+
+            # Go (archive — reference implementation)
+            go
 
             # Tools
             jq
@@ -36,16 +37,18 @@
 
           shellHook = ''
             echo "🔧 durable-iot-migrate dev environment"
-            echo "   Go:           $(go version | cut -d' ' -f3)"
+            echo "   Clojure:      $(clj --version 2>&1)"
+            echo "   Java:         $(java -version 2>&1 | head -1)"
             echo "   Temporal CLI: $(temporal --version 2>/dev/null | head -1)"
             echo ""
             echo "Quick start:"
-            echo "  temporal server start-dev    # Start dev server (gRPC:7233, UI:8233)"
-            echo "  go test ./...                # Run tests"
-            echo "  go run ./cmd/worker          # Start migration worker"
+            echo "  clj -M:test                  # Run Clojure tests"
+            echo "  clj -M:repl                  # Start nREPL"
+            echo "  temporal server start-dev    # Start dev server"
             echo ""
-            export GOPATH="$HOME/go"
-            export PATH="$GOPATH/bin:$PATH"
+            echo "Archive (Go reference):"
+            echo "  cd archive/go && go test ./..."
+            echo ""
           '';
         };
       }
