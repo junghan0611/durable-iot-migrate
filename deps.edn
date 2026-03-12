@@ -1,7 +1,13 @@
-{:paths ["src" "test"]
- :deps  {org.clojure/clojure {:mvn/version "1.12.0"}}
+{:paths ["src"]
+ :deps  {org.clojure/clojure   {:mvn/version "1.12.0"}
+         org.clojure/data.json  {:mvn/version "2.5.1"}
+         ;; YAML parsing (HA automations, Google Home)
+         clj-commons/clj-yaml   {:mvn/version "1.0.27"}}
  :aliases
- {:test {:extra-paths ["test"]
+ {:run  {:main-opts ["-m" "iot.semantic.cli"]}
+  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.7"}}
+          :ns-default build}
+  :test {:extra-paths ["test"]
          :extra-deps  {io.github.cognitect-labs/test-runner
                        {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
          :main-opts   ["-m" "cognitect.test-runner"]}

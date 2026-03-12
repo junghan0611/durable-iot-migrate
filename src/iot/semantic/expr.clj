@@ -160,6 +160,14 @@
    #{}
    expr))
 
+(defn device-refs-recipe
+  "레시피(recipe)에서 참조된 모든 디바이스 ID를 수집한다."
+  [recipe]
+  (reduce (fn [acc expr]
+            (if expr (into acc (device-refs expr)) acc))
+          #{}
+          [(:trigger recipe) (:condition recipe) (:actions recipe)]))
+
 (defn depth
   "트리의 최대 깊이."
   [expr]

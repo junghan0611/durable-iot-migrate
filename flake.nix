@@ -1,5 +1,5 @@
 {
-  description = "durable-iot-migrate — Durable IoT platform migration with Clojure semantic layer";
+  description = "durable-iot-migrate — Durable IoT migration with Clojure semantic layer";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
@@ -10,47 +10,59 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
+        graalvm = pkgs.graalvmPackages.graalvm-ce;
       in
       {
-        devShells.default = pkgs.mkShell {
-          name = "durable-iot-migrate";
+        devShells = {
+          # 기본: GraalVM (native-image 포함)
+          default = pkgs.mkShell {
+            name = "durable-iot-migrate";
 
-          buildInputs = with pkgs; [
-            # Clojure
-            clojure
-            jdk17_headless
+            buildInputs = with pkgs; [
+              clojure
+              graalvm         # JDK + native-image
 
-            # Temporal
-            temporal-cli
+              # Temporal
+              temporal-cli
 
-            # Database
-            postgresql_16  # psql client for Doltgres
+              # Go (archive reference)
+              go
 
-            # Go (archive — reference implementation)
-            go
+              # Tools
+              jq
+              curl
+              git
+            ];
 
-            # Tools
-            jq
-            curl
-            git
-          ];
+            JAVA_HOME = graalvm;
+            GRAALVM_HOME = graalvm;
 
-          shellHook = ''
-            echo "🔧 durable-iot-migrate dev environment"
-            echo "   Clojure:      $(clj --version 2>&1)"
-            echo "   Java:         $(java -version 2>&1 | head -1)"
-            echo "   Temporal CLI: $(temporal --version 2>/dev/null | head -1)"
-            echo ""
-            echo "Quick start:"
-            echo "  clj -M:test                  # Run Clojure tests"
-            echo "  clj -M:repl                  # Start nREPL"
-            echo "  temporal server start-dev    # Start dev server"
-            echo ""
-            echo "Archive (Go reference):"
-            echo "  cd archive/go && go test ./..."
-            echo ""
-          '';
+            shellHook = ''
+              echo "🔧 durable-iot-migrate dev shell (GraalVM)"
+              echo "  ./run.sh test           — Clojure tests"
+              echo "  ./run.sh native-build   — GraalVM native binary"
+              echo "  temporal server start-dev"
+              echo ""
+            '';
+          };
+
+          # JVM만 (가벼운 개발용)
+          jvm = pkgs.mkShell {
+            name = "durable-iot-migrate-jvm";
+
+            buildInputs = with pkgs; [
+              clojure
+              jdk17_headless
+              temporal-cli
+              go
+              jq
+              git
+            ];
+
+            shellHook = ''
+              echo "🔧 durable-iot-migrate dev shell (JVM only)"
+            '';
+          };
         };
-      }
-    );
+      });
 }
