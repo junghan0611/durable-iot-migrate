@@ -43,3 +43,4 @@ target/
 
 # Embedded repos
 tmp/
+.beads/.br_history
