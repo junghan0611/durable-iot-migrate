@@ -33,3 +33,13 @@ temporal-data/
 # Nix
 result
 result-*
+
+# Clojure
+.cpcache/
+.clj-kondo/
+.lsp/
+target/
+*.jar
+
+# Embedded repos
+tmp/
