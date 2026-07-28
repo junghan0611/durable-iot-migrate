@@ -93,7 +93,7 @@ HA corpus: 47 recipes
 
 ## 작은 빚
 
-- GitHub 리포 description이 아직 옛 축이다 (`Temporal · Saga · Doltgres`).
+- 리포 **이름**은 아직 옛 축을 가리킨다(`-migrate`). description·topics는 2026-07-28에 갱신했다.
 - `tmp/temporal-clojure-sdk` 로컬 클론이 남아 있다(gitignore라 리포엔 영향 없음). 정리해도 된다.
 - `ROADMAP.md` 없음 — **의도적.** V4 판독이 나오면 그때 쓴다. 지금 쓰면 빈 로드맵이 부채다.
 - 태그 없음 — 첫 CalVer 스냅샷은 **V3 측정표가 나오면**.
