@@ -27,9 +27,6 @@ vendor/
 .DS_Store
 Thumbs.db
 
-# Temporal
-temporal-data/
-
 # Nix
 result
 result-*
@@ -43,4 +40,3 @@ target/
 
 # Embedded repos
 tmp/
-.beads/.br_history

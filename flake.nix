@@ -1,5 +1,5 @@
 {
-  description = "durable-iot-migrate — Durable IoT migration with Clojure semantic layer";
+  description = "durable-iot-migrate — place + recipe core for small smart-home hubs";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
@@ -22,9 +22,6 @@
               clojure
               graalvm         # JDK + native-image
 
-              # Temporal
-              temporal-cli
-
               # Go (archive reference)
               go
 
@@ -41,7 +38,6 @@
               echo "🔧 durable-iot-migrate dev shell (GraalVM)"
               echo "  ./run.sh test           — Clojure tests"
               echo "  ./run.sh native-build   — GraalVM native binary"
-              echo "  temporal server start-dev"
               echo ""
             '';
           };
@@ -53,7 +49,6 @@
             buildInputs = with pkgs; [
               clojure
               jdk17_headless
-              temporal-cli
               go
               jq
               git
